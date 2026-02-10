@@ -2,6 +2,10 @@
  * Security middleware for JSON content scanning
  */
 
+// Configuration - can be overridden by environment variables
+const MAX_JSON_DEPTH = parseInt(process.env.MAX_JSON_DEPTH) || 25; // Increased from 10 to 25
+const MAX_JSON_SIZE = parseInt(process.env.MAX_JSON_SIZE) || 10 * 1024 * 1024; // Increased to 10MB
+
 /**
  * Basic JSON malware/malicious code scanner
  * Checks for potentially dangerous patterns in JSON content
@@ -68,35 +72,53 @@ const scanJsonContent = (req, res, next) => {
     }
 
     // Check JSON depth (prevent deeply nested structures that could cause DoS)
-    const MAX_DEPTH = 10;
-    const checkDepth = (obj, depth = 0) => {
-      if (depth > MAX_DEPTH) {
-        return false;
-      }
-      if (typeof obj === 'object' && obj !== null) {
-        for (const key in obj) {
-          if (!checkDepth(obj[key], depth + 1)) {
-            return false;
+    // Using iterative approach for better performance with large objects
+    const checkDepth = (obj) => {
+      const stack = [{ obj, depth: 0 }];
+      let maxDepth = 0;
+      
+      while (stack.length > 0) {
+        const { obj: current, depth } = stack.pop();
+        maxDepth = Math.max(maxDepth, depth);
+        
+        if (depth > MAX_JSON_DEPTH) {
+          return { valid: false, depth: maxDepth };
+        }
+        
+        if (typeof current === 'object' && current !== null) {
+          if (Array.isArray(current)) {
+            for (let i = 0; i < current.length; i++) {
+              stack.push({ obj: current[i], depth: depth + 1 });
+            }
+          } else {
+            for (const key in current) {
+              if (current.hasOwnProperty(key)) {
+                stack.push({ obj: current[key], depth: depth + 1 });
+              }
+            }
           }
         }
       }
-      return true;
+      
+      return { valid: true, depth: maxDepth };
     };
 
-    if (!checkDepth(jsonData)) {
+    const depthCheck = checkDepth(jsonData);
+    if (!depthCheck.valid) {
       return res.status(400).json({
         success: false,
-        error: 'JSON content is too deeply nested (max depth: 10 levels)'
+        error: `JSON content is too deeply nested (max depth: ${MAX_JSON_DEPTH} levels, found: ${depthCheck.depth})`,
+        hint: 'Consider flattening your component structure or breaking it into multiple screens'
       });
     }
 
     // Check JSON size (prevent excessively large payloads)
-    const MAX_SIZE = 5 * 1024 * 1024; // 5MB
     const jsonSize = Buffer.byteLength(JSON.stringify(jsonData), 'utf8');
-    if (jsonSize > MAX_SIZE) {
+    if (jsonSize > MAX_JSON_SIZE) {
       return res.status(400).json({
         success: false,
-        error: `JSON content too large. Maximum size is ${MAX_SIZE / (1024 * 1024)}MB`
+        error: `JSON content too large (${(jsonSize / (1024 * 1024)).toFixed(2)}MB). Maximum size is ${MAX_JSON_SIZE / (1024 * 1024)}MB`,
+        hint: 'Consider splitting large screens into smaller, reusable components'
       });
     }
 

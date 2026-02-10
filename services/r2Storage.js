@@ -31,34 +31,45 @@ class R2StorageService {
    */
   async uploadJsonFile(packageName, screenName, jsonContent, version = '1.0.0') {
     try {
-      // Create file path: apps/{packageName}/{screenName}.json
-      const fileName = `${screenName}.json`;
-      const filePath = `apps/${packageName}/${fileName}`;
+      // Create file path: apps/{packageName}/{screenName}/latest.json
+      const latestPath = `apps/${packageName}/${screenName}/latest.json`;
+      // Versioned path: apps/{packageName}/{screenName}/v{version}.json
+      const versionedPath = `apps/${packageName}/${screenName}/v${version}.json`;
 
       // Convert JSON to string
       const jsonString = JSON.stringify(jsonContent, null, 2);
       const buffer = Buffer.from(jsonString, 'utf-8');
 
-      // Upload to R2
-      const command = new PutObjectCommand({
+      const metadata = {
+        version: version,
+        screenName: screenName,
+        packageName: packageName,
+        uploadedAt: new Date().toISOString()
+      };
+
+      // Upload versioned copy
+      await this.client.send(new PutObjectCommand({
         Bucket: this.bucketName,
-        Key: filePath,
+        Key: versionedPath,
         Body: buffer,
         ContentType: 'application/json',
-        Metadata: {
-          version: version,
-          screenName: screenName,
-          packageName: packageName,
-          uploadedAt: new Date().toISOString()
-        }
-      });
+        Metadata: metadata
+      }));
 
-      await this.client.send(command);
+      // Upload/overwrite latest copy
+      await this.client.send(new PutObjectCommand({
+        Bucket: this.bucketName,
+        Key: latestPath,
+        Body: buffer,
+        ContentType: 'application/json',
+        Metadata: metadata
+      }));
 
-      console.log(`JSON file uploaded successfully: ${filePath}`);
+      console.log(`JSON file uploaded: ${versionedPath} + ${latestPath}`);
 
       return {
-        filePath,
+        filePath: latestPath,
+        versionedFilePath: versionedPath,
         fileSize: buffer.length
       };
     } catch (error) {
@@ -180,46 +191,206 @@ class R2StorageService {
   }
 
   /**
-   * Update existing JSON file
-   * @param {string} filePath - Full file path in R2
+   * Update existing JSON file (new version upload)
+   * Archives current version and updates latest
+   * @param {string} packageName - App package name
+   * @param {string} screenName - Screen name
    * @param {object} jsonContent - New JSON content
-   * @param {string} version - Version number (optional)
-   * @returns {Promise<{filePath: string, fileSize: number}>}
+   * @param {string} version - New version number
+   * @returns {Promise<{filePath: string, versionedFilePath: string, fileSize: number}>}
    */
-  async updateJsonFile(filePath, jsonContent, version) {
+  async updateJsonFile(packageName, screenName, jsonContent, version) {
+    // Re-use uploadJsonFile which handles both latest + versioned copies
+    return this.uploadJsonFile(packageName, screenName, jsonContent, version);
+  }
+
+  /**
+   * Get a specific versioned JSON file from R2
+   * Falls back to legacy path format for pre-versioning data
+   * @param {string} packageName - App package name
+   * @param {string} screenName - Screen name
+   * @param {string} version - Version to retrieve
+   * @returns {Promise<object>} - JSON content
+   */
+  async getVersionedJsonFile(packageName, screenName, version) {
+    // Try new versioned path first
+    const versionedPath = `apps/${packageName}/${screenName}/v${version}.json`;
     try {
-      // Check if file exists
-      const exists = await this.fileExists(filePath);
-      if (!exists) {
-        throw new Error('File does not exist');
+      return await this.getJsonFile(versionedPath);
+    } catch (error) {
+      // Fallback: try legacy flat path (pre-versioning format)
+      const legacyPath = `apps/${packageName}/${screenName}.json`;
+      try {
+        console.log(`Version file not found at ${versionedPath}, trying legacy path: ${legacyPath}`);
+        return await this.getJsonFile(legacyPath);
+      } catch (legacyError) {
+        // Neither path exists
+        throw new Error(`Version ${version} file not found in storage`);
+      }
+    }
+  }
+
+  /**
+   * List all version files for a screen in R2
+   * @param {string} packageName - App package name
+   * @param {string} screenName - Screen name
+   * @returns {Promise<Array>} - List of version files
+   */
+  async listScreenVersionFiles(packageName, screenName) {
+    try {
+      const prefix = `apps/${packageName}/${screenName}/`;
+      
+      const command = new ListObjectsV2Command({
+        Bucket: this.bucketName,
+        Prefix: prefix,
+      });
+
+      const response = await this.client.send(command);
+      
+      if (!response.Contents) {
+        return [];
       }
 
-      // Upload new version
+      return response.Contents
+        .filter(item => item.Key.includes('/v') && item.Key.endsWith('.json'))
+        .map(item => {
+          // Extract version from path like apps/pkg/screen/v1.0.0.json
+          const fileName = item.Key.split('/').pop();
+          const version = fileName.replace('v', '').replace('.json', '');
+          return {
+            version,
+            key: item.Key,
+            size: item.Size,
+            lastModified: item.LastModified
+          };
+        })
+        .sort((a, b) => {
+          // Sort by version descending
+          const partsA = a.version.split('.').map(Number);
+          const partsB = b.version.split('.').map(Number);
+          for (let i = 0; i < 3; i++) {
+            if ((partsB[i] || 0) !== (partsA[i] || 0)) return (partsB[i] || 0) - (partsA[i] || 0);
+          }
+          return 0;
+        });
+    } catch (error) {
+      console.error('Error listing screen versions from R2:', error);
+      throw new Error(`Failed to list screen versions: ${error.message}`);
+    }
+  }
+
+  /**
+   * Delete all files for a screen (latest + all versions + legacy)
+   * @param {string} packageName - App package name
+   * @param {string} screenName - Screen name
+   * @returns {Promise<number>} - Number of files deleted
+   */
+  async deleteAllScreenFiles(packageName, screenName) {
+    try {
+      const prefix = `apps/${packageName}/${screenName}/`;
+      
+      const command = new ListObjectsV2Command({
+        Bucket: this.bucketName,
+        Prefix: prefix,
+      });
+
+      const response = await this.client.send(command);
+      let deletedCount = 0;
+
+      if (response.Contents) {
+        for (const item of response.Contents) {
+          await this.deleteJsonFile(item.Key);
+          deletedCount++;
+        }
+      }
+
+      // Also try to delete legacy flat path
+      const legacyPath = `apps/${packageName}/${screenName}.json`;
+      try {
+        if (await this.fileExists(legacyPath)) {
+          await this.deleteJsonFile(legacyPath);
+          deletedCount++;
+        }
+      } catch (e) {
+        // Ignore — legacy file may not exist
+      }
+
+      return deletedCount;
+    } catch (error) {
+      console.error('Error deleting screen files from R2:', error);
+      throw new Error(`Failed to delete screen files: ${error.message}`);
+    }
+  }
+
+  /**
+   * Archive the current version to its versioned path in R2
+   * Reads from existing filePath (latest or legacy) and saves as v{version}.json
+   * @param {string} packageName - App package name
+   * @param {string} screenName - Screen name
+   * @param {string} currentFilePath - Current file path (may be legacy format)
+   * @param {string} version - Version to archive
+   * @returns {Promise<boolean>} - Whether archiving was successful
+   */
+  async archiveCurrentVersion(packageName, screenName, currentFilePath, version) {
+    const versionedPath = `apps/${packageName}/${screenName}/v${version}.json`;
+
+    // Check if already archived at versioned path
+    if (await this.fileExists(versionedPath)) {
+      return true;
+    }
+
+    // Try to read from current filePath and copy to versioned path
+    try {
+      const jsonContent = await this.getJsonFile(currentFilePath);
       const jsonString = JSON.stringify(jsonContent, null, 2);
       const buffer = Buffer.from(jsonString, 'utf-8');
 
-      const command = new PutObjectCommand({
+      await this.client.send(new PutObjectCommand({
         Bucket: this.bucketName,
-        Key: filePath,
+        Key: versionedPath,
         Body: buffer,
         ContentType: 'application/json',
         Metadata: {
-          version: version || '1.0.0',
-          updatedAt: new Date().toISOString()
+          version,
+          screenName,
+          packageName,
+          archivedAt: new Date().toISOString()
         }
-      });
+      }));
 
-      await this.client.send(command);
-
-      console.log(`JSON file updated successfully: ${filePath}`);
-
-      return {
-        filePath,
-        fileSize: buffer.length
-      };
+      console.log(`Archived version ${version} to ${versionedPath}`);
+      return true;
     } catch (error) {
-      console.error('Error updating JSON in R2:', error);
-      throw new Error(`Failed to update JSON file: ${error.message}`);
+      // Also try legacy path as fallback
+      const legacyPath = `apps/${packageName}/${screenName}.json`;
+      if (currentFilePath !== legacyPath) {
+        try {
+          const jsonContent = await this.getJsonFile(legacyPath);
+          const jsonString = JSON.stringify(jsonContent, null, 2);
+          const buffer = Buffer.from(jsonString, 'utf-8');
+
+          await this.client.send(new PutObjectCommand({
+            Bucket: this.bucketName,
+            Key: versionedPath,
+            Body: buffer,
+            ContentType: 'application/json',
+            Metadata: {
+              version,
+              screenName,
+              packageName,
+              archivedAt: new Date().toISOString()
+            }
+          }));
+
+          console.log(`Archived version ${version} from legacy path to ${versionedPath}`);
+          return true;
+        } catch (legacyError) {
+          console.warn(`Could not archive version ${version}: file not found at either path`);
+          return false;
+        }
+      }
+      console.warn(`Could not archive version ${version}: ${error.message}`);
+      return false;
     }
   }
 

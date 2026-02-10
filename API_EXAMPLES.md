@@ -568,6 +568,160 @@ Headers:
 
 ---
 
+## Screen Versioning
+
+The SDUI backend supports full version history for screens. Every time you upload a new version, the previous version is automatically archived in R2 storage and tracked in the database.
+
+### How Versioning Works
+
+1. **First upload** creates the screen at version `1.0.0` (or your specified version)
+2. **Subsequent uploads** with the same `screenName` require a **higher version** — the current version is archived automatically
+3. **Version files** are stored at `apps/{packageName}/{screenName}/v{version}.json`
+4. **Latest file** is always kept at `apps/{packageName}/{screenName}/latest.json` for mobile apps
+5. **Rollback** creates a new patch version with the old version's content
+
+### Upload a New Version (Same Endpoint)
+
+```bash
+curl -X POST http://localhost:3000/api/screens/com.example.app/upload \
+  -H "Content-Type: application/json" \
+  -H "x-developer-api-key: YOUR_DEVELOPER_API_KEY" \
+  -d '{
+    "screenName": "home_screen",
+    "jsonContent": "{\"type\":\"screen\",\"version\":\"2.0.0\",\"body\":{\"type\":\"container\"}}",
+    "version": "2.0.0"
+  }'
+```
+
+**Response:**
+```json
+{
+  "success": true,
+  "message": "Screen updated to version 2.0.0",
+  "data": {
+    "screen": {
+      "id": "...",
+      "screenName": "home_screen",
+      "jsonFilePath": "apps/com.example.app/home_screen/latest.json",
+      "version": "2.0.0",
+      "previousVersion": "1.0.0",
+      "totalVersions": 2,
+      "fileSize": 183
+    }
+  }
+}
+```
+
+> **Note:** Version must be higher than the current version (semver comparison). Uploading `1.5.0` when current is `2.0.0` will be rejected.
+
+### List All Versions
+
+```bash
+curl -X GET http://localhost:3000/api/screens/com.example.app/home_screen/versions \
+  -H "x-developer-api-key: YOUR_DEVELOPER_API_KEY"
+```
+
+**Response:**
+```json
+{
+  "success": true,
+  "data": {
+    "screenName": "home_screen",
+    "currentVersion": "3.0.0",
+    "totalVersions": 3,
+    "versions": [
+      { "version": "3.0.0", "isCurrent": true, "fileSize": 355, "createdAt": "..." },
+      { "version": "2.0.0", "isCurrent": false, "fileSize": 668, "createdAt": "..." },
+      { "version": "1.0.0", "isCurrent": false, "fileSize": 566, "createdAt": "..." }
+    ]
+  }
+}
+```
+
+### Fetch a Specific Version's JSON
+
+```bash
+curl -X GET http://localhost:3000/api/screens/com.example.app/home_screen/versions/2.0.0 \
+  -H "x-developer-api-key: YOUR_DEVELOPER_API_KEY"
+```
+
+**Response:**
+```json
+{
+  "success": true,
+  "data": {
+    "screenName": "home_screen",
+    "version": "2.0.0",
+    "isCurrent": false,
+    "ui": { "type": "screen", "version": "2.0.0", "body": { ... } }
+  }
+}
+```
+
+### Rollback to a Previous Version
+
+Rollback fetches the old version's content and creates a **new patch version** with it. This preserves full history — nothing is deleted.
+
+```bash
+curl -X POST http://localhost:3000/api/screens/com.example.app/home_screen/rollback/2.0.0 \
+  -H "x-developer-api-key: YOUR_DEVELOPER_API_KEY"
+```
+
+**Response:**
+```json
+{
+  "success": true,
+  "message": "Screen rolled back from 3.0.0 to content of 2.0.0 (new version: 3.0.1)",
+  "data": {
+    "screenName": "home_screen",
+    "version": "3.0.1",
+    "rolledBackFrom": "3.0.0",
+    "restoredContent": "2.0.0",
+    "totalVersions": 4
+  }
+}
+```
+
+> **How rollback works:** If current version is `3.0.0` and you rollback to `2.0.0`, the system:
+> 1. Archives `3.0.0` to version history
+> 2. Copies `2.0.0`'s JSON content
+> 3. Creates version `3.0.1` with that content
+> 4. Mobile apps instantly get the rolled-back content via `latest.json`
+
+### R2 Storage Structure (After Versioning)
+
+```
+ketoy/
+  apps/
+    com.example.app/
+      home_screen/
+        latest.json          ← Always the current version (served to mobile)
+        v1.0.0.json          ← Archived version
+        v2.0.0.json          ← Archived version
+        v3.0.0.json          ← Archived version
+        v3.0.1.json          ← Rollback version (content from v2.0.0)
+```
+
+### Delete Screen (Removes All Versions)
+
+When you delete a screen, all version files are removed from R2:
+
+```bash
+curl -X DELETE http://localhost:3000/api/screens/com.example.app/home_screen \
+  -H "x-developer-api-key: YOUR_DEVELOPER_API_KEY"
+```
+
+**Response:**
+```json
+{
+  "success": true,
+  "message": "Screen deleted successfully",
+  "data": { "deletedFiles": 5 }
+}
+```
+
+---
+
 ## Testing Error Scenarios
 
 ### 1. Invalid API Key
@@ -604,6 +758,31 @@ curl -X POST http://localhost:3000/api/screens/com.startup.app/upload \
   }'
 ```
 **Expected:** 400 Bad Request (Security scan failed)
+
+### 5. JSON Too Deeply Nested
+```bash
+curl -X POST http://localhost:3000/api/screens/com.startup.app/upload \
+  -H "Content-Type: application/json" \
+  -H "x-developer-api-key: YOUR_DEVELOPER_API_KEY" \
+  -d '{
+    "screenName": "nested",
+    "jsonContent": "...(deeply nested JSON beyond 25 levels)..."
+  }'
+```
+**Expected:** 400 Bad Request
+```json
+{
+  "success": false,
+  "error": "JSON content is too deeply nested (max depth: 25 levels, found: 30)",
+  "hint": "Consider flattening your component structure or breaking it into multiple screens"
+}
+```
+
+**Note:** Default limits are 25 nesting levels and 10MB size. These can be configured via environment variables:
+```env
+MAX_JSON_DEPTH=25
+MAX_JSON_SIZE=10485760
+```
 
 ---
 

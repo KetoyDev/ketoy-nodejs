@@ -665,6 +665,90 @@ Copy the JSON below and import it into Postman (File → Import → Raw Text):
             },
             "description": "Delete a screen and its JSON file from storage"
           }
+        },
+        {
+          "name": "List Screen Versions",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "x-developer-api-key",
+                "value": "{{developerApiKey}}",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/screens/{{packageName}}/{{screenName}}/versions",
+              "host": ["{{baseUrl}}"],
+              "path": ["screens", "{{packageName}}", "{{screenName}}", "versions"]
+            },
+            "description": "List all versions of a screen (current + version history)"
+          }
+        },
+        {
+          "name": "Get Specific Version JSON",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "x-developer-api-key",
+                "value": "{{developerApiKey}}",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/screens/{{packageName}}/{{screenName}}/versions/1.0.0",
+              "host": ["{{baseUrl}}"],
+              "path": ["screens", "{{packageName}}", "{{screenName}}", "versions", "1.0.0"]
+            },
+            "description": "Fetch the JSON content for a specific version of a screen"
+          }
+        },
+        {
+          "name": "Rollback to Previous Version",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "x-developer-api-key",
+                "value": "{{developerApiKey}}",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/screens/{{packageName}}/{{screenName}}/rollback/1.0.0",
+              "host": ["{{baseUrl}}"],
+              "path": ["screens", "{{packageName}}", "{{screenName}}", "rollback", "1.0.0"]
+            },
+            "description": "Rollback to a previous screen version. Creates a new patch version with the old content."
+          }
+        },
+        {
+          "name": "Upload New Version (Version Bump)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "x-developer-api-key",
+                "value": "{{developerApiKey}}",
+                "type": "text"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"screenName\": \"{{screenName}}\",\n  \"version\": \"2.0.0\",\n  \"jsonContent\": \"{\\\"screenType\\\":\\\"home\\\",\\\"layout\\\":{\\\"type\\\":\\\"vertical\\\"},\\\"components\\\":[{\\\"id\\\":\\\"header\\\",\\\"type\\\":\\\"text\\\",\\\"text\\\":\\\"Updated V2\\\"}]}\"\n}"
+            },
+            "url": {
+              "raw": "{{baseUrl}}/screens/{{packageName}}/upload",
+              "host": ["{{baseUrl}}"],
+              "path": ["screens", "{{packageName}}", "upload"]
+            },
+            "description": "Upload a new version of an existing screen. Version must be higher than current. Previous version is automatically archived."
+          }
         }
       ]
     },
@@ -870,6 +954,10 @@ If your server is running on a different port or host, update the `baseUrl` vari
 - ✅ Mobile API access with correct credentials
 - ✅ Update operations with valid data
 - ✅ Statistics and listing endpoints
+- ✅ Version bump upload (higher version)
+- ✅ List all screen versions
+- ✅ Fetch specific version JSON
+- ✅ Rollback to previous version
 
 ### Error Test Cases
 - ❌ Invalid API key authentication
@@ -877,6 +965,9 @@ If your server is running on a different port or host, update the `baseUrl` vari
 - ❌ Duplicate app/screen names
 - ❌ Access to non-existent resources
 - ❌ Unauthorized access attempts
+- ❌ Upload lower version than current (should be rejected)
+- ❌ Rollback to non-existent version
+- ❌ Rollback to current version (already active)
 
 ### Rate Limiting Tests
 - 🚦 Send more than 100 requests in 15 minutes

@@ -467,8 +467,14 @@ Automatically scans uploaded JSON for:
 - eval() and execScript calls
 - Path traversal attempts
 - System file access patterns
-- Excessive nesting (max 10 levels)
-- Large payloads (max 5MB)
+- Excessive nesting (default max: 25 levels, configurable)
+- Large payloads (default max: 10MB, configurable)
+
+**Configuration:**
+```env
+MAX_JSON_DEPTH=25    # Maximum nesting depth
+MAX_JSON_SIZE=10485760  # Maximum size in bytes (10MB)
+```
 
 ### 3. Rate Limiting
 - 100 requests per 15 minutes per IP

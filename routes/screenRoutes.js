@@ -6,7 +6,10 @@ const {
   getAppScreens,
   getScreenDetails,
   deleteScreen,
-  getScreenJson
+  getScreenJson,
+  getScreenVersions,
+  getScreenByVersion,
+  rollbackScreenVersion
 } = require('../controllers/screenController');
 const {
   validateScreenUpload,
@@ -23,7 +26,7 @@ const {
 
 /**
  * @route   POST /api/screens/:packageName/upload
- * @desc    Upload/Create a new screen
+ * @desc    Upload/Create a new screen or new version of existing screen
  * @access  Private (Developer)
  */
 router.post(
@@ -52,6 +55,42 @@ router.get(
   validateDeveloper,
   validatePackageName,
   getScreenDetails
+);
+
+/**
+ * @route   GET /api/screens/:packageName/:screenName/versions
+ * @desc    Get all versions of a screen
+ * @access  Private (Developer)
+ */
+router.get(
+  '/:packageName/:screenName/versions',
+  validateDeveloper,
+  validatePackageName,
+  getScreenVersions
+);
+
+/**
+ * @route   GET /api/screens/:packageName/:screenName/versions/:version
+ * @desc    Get a specific version's JSON
+ * @access  Private (Developer)
+ */
+router.get(
+  '/:packageName/:screenName/versions/:version',
+  validateDeveloper,
+  validatePackageName,
+  getScreenByVersion
+);
+
+/**
+ * @route   POST /api/screens/:packageName/:screenName/rollback/:version
+ * @desc    Rollback screen to a previous version
+ * @access  Private (Developer)
+ */
+router.post(
+  '/:packageName/:screenName/rollback/:version',
+  validateDeveloper,
+  validatePackageName,
+  rollbackScreenVersion
 );
 
 /**

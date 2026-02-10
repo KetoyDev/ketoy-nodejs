@@ -1,5 +1,23 @@
 const mongoose = require('mongoose');
 
+const versionHistorySchema = new mongoose.Schema({
+  version: {
+    type: String,
+    required: true
+  },
+  jsonFilePath: {
+    type: String,
+    required: true
+  },
+  fileSize: {
+    type: Number
+  },
+  createdAt: {
+    type: Date,
+    default: Date.now
+  }
+}, { _id: true });
+
 const screenSchema = new mongoose.Schema({
   app: {
     type: mongoose.Schema.Types.ObjectId,
@@ -33,6 +51,7 @@ const screenSchema = new mongoose.Schema({
     type: String,
     default: '1.0.0'
   },
+  versionHistory: [versionHistorySchema],
   isActive: {
     type: Boolean,
     default: true
@@ -89,6 +108,22 @@ screenSchema.methods.toJSON = function() {
   const screen = this.toObject();
   delete screen.__v;
   return screen;
+};
+
+/**
+ * Compare two semver version strings
+ * Returns: 1 if a > b, -1 if a < b, 0 if equal
+ */
+screenSchema.statics.compareVersions = function(a, b) {
+  const partsA = a.split('.').map(Number);
+  const partsB = b.split('.').map(Number);
+  for (let i = 0; i < 3; i++) {
+    const numA = partsA[i] || 0;
+    const numB = partsB[i] || 0;
+    if (numA > numB) return 1;
+    if (numA < numB) return -1;
+  }
+  return 0;
 };
 
 // Static method to find screen by package and screen name
