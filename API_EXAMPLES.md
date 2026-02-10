@@ -154,11 +154,49 @@ The `jsonContent` field must be a **JSON string**, not a JSON object. When decod
 
 ### Step 4: Fetch Screen from Mobile App
 
+**Get Full Screen JSON:**
 ```bash
 curl -X GET "http://localhost:3000/api/v1/screen?screen_name=home_screen" \
   -H "x-api-key: fa044a28d695b2fa4339a5caf568caa21ffeac1b9b9736bbaddc922515141dc6" \
   -H "x-package-name: com.developerstring.ketoy"
 ```
+
+**Response:**
+```json
+{
+  "success": true,
+  "data": {
+    "screenName": "home_screen",
+    "version": "1.0.0",
+    "ui": {
+      "screenType": "home",
+      "layout": {...},
+      "components": [...]
+    }
+  }
+}
+```
+
+**Get Screen Version Only (to check for updates):**
+```bash
+curl -X GET "http://localhost:3000/api/v1/screen/version?screen_name=home_screen" \
+  -H "x-api-key: fa044a28d695b2fa4339a5caf568caa21ffeac1b9b9736bbaddc922515141dc6" \
+  -H "x-package-name: com.developerstring.ketoy"
+```
+
+**Response:**
+```json
+{
+  "success": true,
+  "data": {
+    "screenName": "home_screen",
+    "version": "1.0.0",
+    "updatedAt": "2026-02-10T08:55:00.000Z"
+  }
+}
+```
+
+**Use Case:** Mobile apps can call the version endpoint first to check if their cached screen needs updating, avoiding unnecessary downloads of full JSON when the version hasn't changed.
 
 ---
 
@@ -504,9 +542,17 @@ Headers: x-developer-api-key: YOUR_DEVELOPER_API_KEY
 
 ### 4. Mobile App Integration
 
-**Fetch Home Screen:**
+**Fetch Home Screen (Full JSON):**
 ```bash
 GET /api/v1/screen?screen_name=home
+Headers:
+  x-api-key: YOUR_APP_API_KEY
+  x-package-name: com.startup.app
+```
+
+**Check Screen Version (for updates):**
+```bash
+GET /api/v1/screen/version?screen_name=home
 Headers:
   x-api-key: YOUR_APP_API_KEY
   x-package-name: com.startup.app
@@ -574,9 +620,16 @@ interface SDUIService {
         @Header("x-api-key") apiKey: String,
         @Header("x-package-name") packageName: String
     ): Response<ScreenResponse>
+    
+    @GET("v1/screen/version")
+    suspend fun getScreenVersion(
+        @Query("screen_name") screenName: String,
+        @Header("x-api-key") apiKey: String,
+        @Header("x-package-name") packageName: String
+    ): Response<VersionResponse>
 }
 
-// Usage
+// Usage with version check
 class ScreenRepository(private val api: SDUIService) {
     suspend fun fetchScreen(screenName: String): ScreenResponse {
         return api.getScreen(
@@ -584,6 +637,23 @@ class ScreenRepository(private val api: SDUIService) {
             apiKey = BuildConfig.API_KEY,
             packageName = BuildConfig.APPLICATION_ID
         )
+    }
+    
+    suspend fun checkScreenVersion(screenName: String): VersionResponse {
+        return api.getScreenVersion(
+            screenName = screenName,
+            apiKey = BuildConfig.API_KEY,
+            packageName = BuildConfig.APPLICATION_ID
+        )
+    }
+    
+    // Smart fetch - only download if version changed
+    suspend fun fetchScreenIfUpdated(screenName: String, cachedVersion: String?): ScreenResponse? {
+        val versionInfo = checkScreenVersion(screenName)
+        if (versionInfo.data.version != cachedVersion) {
+            return fetchScreen(screenName)
+        }
+        return null // Use cached version
     }
 }
 ```
@@ -601,6 +671,32 @@ class SDUIService {
         URLSession.shared.dataTask(with: request) { data, response, error in
             // Handle response
         }.resume()
+    }
+    
+    func checkScreenVersion(screenName: String, completion: @escaping (Result<VersionResponse, Error>) -> Void) {
+        var request = URLRequest(url: URL(string: "https://api.example.com/api/v1/screen/version?screen_name=\(screenName)")!)
+        request.setValue(apiKey, forHTTPHeaderField: "x-api-key")
+        request.setValue(packageName, forHTTPHeaderField: "x-package-name")
+        
+        URLSession.shared.dataTask(with: request) { data, response, error in
+            // Handle response
+        }.resume()
+    }
+    
+    // Smart fetch - only download if version changed
+    func fetchScreenIfUpdated(screenName: String, cachedVersion: String?, completion: @escaping (Result<ScreenResponse?, Error>) -> Void) {
+        checkScreenVersion(screenName: screenName) { result in
+            switch result {
+            case .success(let versionInfo):
+                if versionInfo.data.version != cachedVersion {
+                    self.fetchScreen(screenName: screenName, completion: completion)
+                } else {
+                    completion(.success(nil)) // Use cached version
+                }
+            case .failure(let error):
+                completion(.failure(error))
+            }
+        }
     }
 }
 ```

@@ -58,7 +58,10 @@ app.get('/', (req, res) => {
       developers: 'Manage developer accounts',
       apps: 'Manage mobile applications',
       screens: 'Manage screen UI definitions',
-      mobileEndpoint: 'GET /api/v1/screen - Retrieve UI JSON for mobile apps'
+      mobileEndpoints: {
+        getScreen: 'GET /api/v1/screen - Retrieve full UI JSON for mobile apps',
+        getVersion: 'GET /api/v1/screen/version - Check screen version for updates'
+      }
     },
     endpoints: {
       api: '/api',

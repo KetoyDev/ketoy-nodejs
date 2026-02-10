@@ -17,7 +17,10 @@ router.get('/', (req, res) => {
       developers: '/api/developers',
       apps: '/api/apps',
       screens: '/api/screens',
-      mobileApi: '/api/v1/screen'
+      mobileApi: {
+        getScreen: '/api/v1/screen?screen_name={screenName}',
+        getVersion: '/api/v1/screen/version?screen_name={screenName}'
+      }
     },
     documentation: 'See README.md for detailed API documentation'
   });
@@ -40,9 +43,9 @@ router.use('/developers', developerRoutes);
 router.use('/apps', appRoutes);
 router.use('/screens', screenRoutes);
 
-// Mobile API route (public with API key)
+// Mobile API routes (public with API key)
 const { validateApiKey, validateScreenRetrieval } = require('../middleware');
-const { getScreenJson } = require('../controllers/screenController');
+const { getScreenJson, getScreenVersion } = require('../controllers/screenController');
 
 /**
  * @route   GET /api/v1/screen
@@ -52,5 +55,14 @@ const { getScreenJson } = require('../controllers/screenController');
  * @headers x-api-key, x-package-name
  */
 router.get('/v1/screen', validateApiKey, validateScreenRetrieval, getScreenJson);
+
+/**
+ * @route   GET /api/v1/screen/version
+ * @desc    Get screen version for mobile app (Check for updates)
+ * @access  Public (with API Key)
+ * @query   screen_name
+ * @headers x-api-key, x-package-name
+ */
+router.get('/v1/screen/version', validateApiKey, getScreenVersion);
 
 module.exports = router;

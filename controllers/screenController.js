@@ -336,11 +336,65 @@ const getScreenJson = asyncHandler(async (req, res) => {
   });
 });
 
+/**
+ * @desc    Get screen version only (for mobile apps to check updates)
+ * @route   GET /api/v1/screen/version?screen_name=xxx
+ * @access  Public (with API Key)
+ */
+const getScreenVersion = asyncHandler(async (req, res) => {
+  const { screen_name } = req.query;
+  const packageName = req.packageName; // Set by validateApiKey middleware
+
+  if (!screen_name) {
+    return res.status(400).json({
+      success: false,
+      error: 'screen_name query parameter is required'
+    });
+  }
+
+  // Find screen
+  const screen = await Screen.findByPackageAndScreen(packageName, screen_name);
+
+  if (!screen) {
+    return res.status(404).json({
+      success: false,
+      error: 'Screen not found'
+    });
+  }
+
+  // Check if screen is active
+  if (!screen.isActive) {
+    return res.status(403).json({
+      success: false,
+      error: 'This screen is currently inactive'
+    });
+  }
+
+  // Check if app is active
+  if (!screen.app.isActive) {
+    return res.status(403).json({
+      success: false,
+      error: 'This app is currently inactive'
+    });
+  }
+
+  // Return only version info (no R2 fetch needed)
+  res.status(200).json({
+    success: true,
+    data: {
+      screenName: screen.screenName,
+      version: screen.version,
+      updatedAt: screen.updatedAt
+    }
+  });
+});
+
 module.exports = {
   uploadScreen,
   updateScreen,
   getAppScreens,
   getScreenDetails,
   deleteScreen,
-  getScreenJson
+  getScreenJson,
+  getScreenVersion
 };
